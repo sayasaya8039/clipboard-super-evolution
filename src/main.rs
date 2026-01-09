@@ -1,3 +1,6 @@
+// Prevent console window on Windows
+#![windows_subsystem = "windows"]
+
 //! Clipboard Super Evolution - AI-powered clipboard manager
 //! Version: 0.1.0
 
