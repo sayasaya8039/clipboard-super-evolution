@@ -6,7 +6,7 @@ mod analyzer;
 mod actions;
 mod icon;
 
-use eframe::egui;
+use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use arboard::Clipboard;
@@ -34,8 +34,59 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Clipboard Super Evolution",
         options,
-        Box::new(|cc| Ok(Box::new(ClipboardApp::new(cc)))),
+        Box::new(|cc| {
+            // Configure Japanese fonts
+            setup_custom_fonts(&cc.egui_ctx);
+            Ok(Box::new(ClipboardApp::new(cc)))
+        }),
     )
+}
+
+fn setup_custom_fonts(ctx: &egui::Context) {
+    let mut fonts = FontDefinitions::default();
+
+    // Try to load Windows Japanese fonts
+    let font_paths = [
+        "C:/Windows/Fonts/meiryo.ttc",      // Meiryo
+        "C:/Windows/Fonts/msgothic.ttc",    // MS Gothic
+        "C:/Windows/Fonts/YuGothM.ttc",     // Yu Gothic
+        "C:/Windows/Fonts/msmincho.ttc",    // MS Mincho
+    ];
+
+    let mut font_loaded = false;
+
+    for font_path in &font_paths {
+        if let Ok(font_data) = std::fs::read(font_path) {
+            fonts.font_data.insert(
+                "japanese_font".to_owned(),
+                FontData::from_owned(font_data).into(),
+            );
+
+            // Add Japanese font to proportional family (primary)
+            fonts
+                .families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .insert(0, "japanese_font".to_owned());
+
+            // Also add to monospace for code
+            fonts
+                .families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .insert(0, "japanese_font".to_owned());
+
+            println!("✅ Loaded Japanese font: {}", font_path);
+            font_loaded = true;
+            break;
+        }
+    }
+
+    if !font_loaded {
+        println!("⚠️ No Japanese font found, using default");
+    }
+
+    ctx.set_fonts(fonts);
 }
 
 struct ClipboardEntry {
@@ -136,20 +187,20 @@ impl eframe::App for ClipboardApp {
             ui.horizontal(|ui| {
                 ui.label("🔍");
                 ui.add(egui::TextEdit::singleline(&mut self.search_query)
-                    .hint_text("Search history..."));
+                    .hint_text("履歴を検索..."));
             });
         });
 
         if self.show_settings {
-            egui::Window::new("Settings")
+            egui::Window::new("設定")
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
-                    ui.label("⚙️ Settings");
+                    ui.label("⚙️ 設定");
                     ui.separator();
-                    ui.label("History limit: 100 items");
-                    ui.label("Monitor interval: 300ms");
-                    if ui.button("Close").clicked() {
+                    ui.label("履歴上限: 100件");
+                    ui.label("監視間隔: 300ms");
+                    if ui.button("閉じる").clicked() {
                         self.show_settings = false;
                     }
                 });
@@ -168,35 +219,35 @@ impl eframe::App for ClipboardApp {
                 if filtered.is_empty() {
                     ui.vertical_centered(|ui| {
                         ui.add_space(50.0);
-                        ui.label("📋 No clipboard history yet");
-                        ui.label("Copy something to get started!");
+                        ui.label("📋 クリップボード履歴がありません");
+                        ui.label("何かをコピーしてください！");
                     });
                 } else {
                     for entry in filtered {
                         ui.group(|ui| {
                             // Header with type and timestamp
                             ui.horizontal(|ui| {
-                                let type_icon = match &entry.content_type {
-                                    ContentType::Url => "🌐",
-                                    ContentType::Email => "📧",
-                                    ContentType::Phone => "📞",
-                                    ContentType::Address => "🗺️",
-                                    ContentType::Code(_) => "💻",
-                                    ContentType::English => "🔤",
-                                    ContentType::Japanese => "🇯🇵",
-                                    ContentType::Mixed => "🌏",
-                                    ContentType::Unknown => "📝",
+                                let (type_icon, type_label) = match &entry.content_type {
+                                    ContentType::Url => ("🌐", "URL"),
+                                    ContentType::Email => ("📧", "メール"),
+                                    ContentType::Phone => ("📞", "電話番号"),
+                                    ContentType::Address => ("🗺️", "住所"),
+                                    ContentType::Code(lang) => ("💻", lang.as_str()),
+                                    ContentType::English => ("🔤", "英語"),
+                                    ContentType::Japanese => ("🇯🇵", "日本語"),
+                                    ContentType::Mixed => ("🌏", "混合"),
+                                    ContentType::Unknown => ("📝", "テキスト"),
                                 };
                                 ui.label(type_icon);
-                                ui.label(format!("{:?}", entry.content_type));
+                                ui.label(type_label);
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     ui.small(&entry.timestamp);
                                 });
                             });
 
                             // Content preview
-                            let preview = if entry.content.len() > 100 {
-                                format!("{}...", &entry.content[..100])
+                            let preview = if entry.content.chars().count() > 100 {
+                                format!("{}...", entry.content.chars().take(100).collect::<String>())
                             } else {
                                 entry.content.clone()
                             };
@@ -205,13 +256,22 @@ impl eframe::App for ClipboardApp {
                             // Action buttons
                             ui.horizontal(|ui| {
                                 for action in &entry.actions {
-                                    if ui.small_button(format!("{} {}", action.icon, action.label)).clicked() {
+                                    let label = match action.label.as_str() {
+                                        "Open in Browser" => "ブラウザで開く",
+                                        "Open in Google Maps" => "マップで開く",
+                                        "Translate to Japanese" => "翻訳",
+                                        "Compose email" => "メール作成",
+                                        "Call this number" => "電話する",
+                                        "Save to favorites" => "お気に入り",
+                                        _ => &action.label,
+                                    };
+                                    if ui.small_button(format!("{} {}", action.icon, label)).clicked() {
                                         if let Some(url) = &action.url {
                                             let _ = open::that(url);
                                         }
                                     }
                                 }
-                                if ui.small_button("📋 Copy").clicked() {
+                                if ui.small_button("📋 コピー").clicked() {
                                     if let Ok(mut clipboard) = Clipboard::new() {
                                         let _ = clipboard.set_text(&entry.content);
                                     }
@@ -227,7 +287,7 @@ impl eframe::App for ClipboardApp {
         egui::TopBottomPanel::bottom("footer").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 let history_len = self.history.lock().map(|h| h.len()).unwrap_or(0);
-                ui.label(format!("📚 {} items", history_len));
+                ui.label(format!("📚 {} 件", history_len));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.small("v0.1.0");
                 });
